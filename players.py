@@ -2,7 +2,6 @@ import random
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 import copy
-import time
 
 from site_location import (
     SiteLocationPlayer,
@@ -204,6 +203,73 @@ class MaxDensityAllocPlayer(SiteLocationPlayer):
 
         self.sorted_density_indices = None
 
+    def player_attractiveness_allocation(
+        self,
+        stores,
+        slmap,
+        store_config,
+    ):
+        best_attractiveness = np.zeros(slmap.size)
+        for store in stores:
+            distances = euclidian_distances(slmap.size, store.pos)
+            attractiveness = (
+                store_config[store.store_type]["attractiveness"]
+                / np.maximum(distances, np.ones(distances.shape))
+                - store_config[store.store_type]["attractiveness_constant"]
+            )
+            attractiveness = np.where(attractiveness < 0, 0, attractiveness)
+            best_attractiveness = np.maximum(best_attractiveness, attractiveness)
+
+        return best_attractiveness
+
+    def all_players_attractiveness_allocation(
+        self,
+        slmap: SiteLocationMap,
+        stores: Dict[int, List[Store]],
+        store_config: Dict[str, Dict[str, float]],
+    ) -> Dict[int, np.ndarray]:
+        """Returns population allocation per player for the given map, players and stores.
+        Allocation for a given player is a numpy array of the same size as the map,
+        with the fraction of the population allocated to that player in each grid
+        location.
+        Each grid location will be allocated to the players based on a ratio of
+        attractiveness of the stores to that grid location.
+        attractiveness = store_attractiveness / distance - store_attractiveness_constant
+        For a given player, only the store with the max attractiveness to a given
+        grid location is considered (ie. doubling up on stores in the same location
+        will not result in more population).
+        Arguments:
+        - slmap: SiteLocationMap object
+        - stores: all stores for each player by id
+        - store_config: configuration from the game config
+        """
+
+        attractiveness_by_player = {}
+        for player_id in stores:
+            best_attractiveness = self.player_attractiveness_allocation(
+                stores[player_id], slmap, store_config
+            )
+            attractiveness_by_player[player_id] = best_attractiveness
+
+        return attractiveness_by_player
+
+    def normalized_attractiveness_allocation(
+        self, slmap, stores, attractiveness_by_player
+    ):
+        total_attractiveness = np.zeros(slmap.size)
+        for player_id in stores:
+            total_attractiveness += attractiveness_by_player[player_id]
+        total_attractiveness = np.where(
+            total_attractiveness == 0, 1, total_attractiveness
+        )
+
+        player_allocations = {}
+        for player_id in stores:
+            allocation = attractiveness_by_player[player_id] / total_attractiveness
+            player_allocations[player_id] = allocation
+
+        return player_allocations
+
     def place_stores(
         self,
         slmap: SiteLocationMap,
@@ -223,8 +289,6 @@ class MaxDensityAllocPlayer(SiteLocationPlayer):
                 all_stores_pos.append(np.array(player_store.pos))
 
         # Sort store positions by highest population density
-        # TODO: Make this more efficient
-        start = time.time()
         if self.sorted_density_indices is None:
             self.sorted_density_indices = np.dstack(
                 np.unravel_index(
@@ -232,10 +296,16 @@ class MaxDensityAllocPlayer(SiteLocationPlayer):
                 )
             )[0][::-1]
 
+        store_type = "small"
+        for _store_type in ["medium", "large"]:
+            if current_funds >= store_conf[_store_type]["capital_cost"]:
+                store_type = _store_type
+            else:
+                break
+
         # Filter positions that are too close to other stores
-        # TODO: Vary min_dist with store type
-        min_dist = 50
-        num_positions_to_consider = 400
+        min_dist = store_conf[store_type]["attractiveness"]
+        num_positions_to_consider = 100
         legal_indices = []
 
         if all_stores_pos:
@@ -255,44 +325,40 @@ class MaxDensityAllocPlayer(SiteLocationPlayer):
             legal_indices = list(map(tuple, self.sorted_density_indices))[
                 :num_positions_to_consider
             ]
-        end = time.time()
 
-        print(f"Sorting runtime: {end - start}")
+        attractiveness_by_player = self.all_players_attractiveness_allocation(
+            slmap, store_locations, store_conf
+        )
 
         best_score = 0.0
-        best_store = None
+        self.stores_to_place = []
 
-        start = time.time()
-        for store_type in {"large", "medium", "small"}:
-            if current_funds < store_conf[store_type]["capital_cost"]:
-                continue
+        for pos in legal_indices:
+            sample_store = Store(pos, store_type)
+            temp_store_locations = copy.deepcopy(store_locations)
+            temp_store_locations[self.player_id].append(sample_store)
 
-            for pos in legal_indices:
-                sample_store = Store(pos, store_type)
-                temp_store_locations = copy.deepcopy(store_locations)
-                temp_store_locations[self.player_id].append(sample_store)
-                sample_alloc = attractiveness_allocation(
-                    slmap, temp_store_locations, store_conf
-                )
-                sample_score = (
-                    sample_alloc[self.player_id] * slmap.population_distribution
-                ).sum()
+            temp_attractiveness_by_player = copy.deepcopy(attractiveness_by_player)
 
-                if sample_score > best_score:
-                    best_score = sample_score
-                    best_store = sample_store
+            sample_player_alloc = self.player_attractiveness_allocation(
+                temp_store_locations[self.player_id], slmap, store_conf
+            )
+            temp_attractiveness_by_player[self.player_id] = sample_player_alloc
+            sample_alloc = self.normalized_attractiveness_allocation(
+                slmap, temp_store_locations, temp_attractiveness_by_player
+            )
+            sample_score = (
+                sample_alloc[self.player_id] * slmap.population_distribution
+            ).sum()
 
-        end = time.time()
-        print(f"Store selection runtime: {end - start}")
+            if sample_score > best_score:
+                best_score = sample_score
+                self.stores_to_place = [sample_store]
 
-        if not best_store:
+        if not self.stores_to_place:
             # Place the most expensive store we can afford
-            best_store = None
             for store_type in {"small", "medium", "large"}:
                 if current_funds <= store_conf[store_type]["capital_cost"]:
-                    best_store = Store(legal_indices[0], store_type)
+                    self.stores_to_place = [Store(legal_indices[0], store_type)]
                 else:
                     break
-
-        print(f"Attempting to place a {best_store.store_type} at {best_store.pos}")
-        self.stores_to_place = [best_store] if best_store else []
