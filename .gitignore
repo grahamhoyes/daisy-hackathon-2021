@@ -141,3 +141,6 @@ cython_debug/
 .vscode/
 .code/
 .idea/
+
+# Game folders
+game/
