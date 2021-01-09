@@ -22,7 +22,6 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
     the allocation function.
     """
 
-
     def player_attractiveness_allocation(
         self,
         stores,
@@ -72,24 +71,21 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
         attractiveness_by_player = {}
         for player_id in stores:
             best_attractiveness = self.player_attractiveness_allocation(
-                stores[player_id],
-                slmap,
-                store_config
+                stores[player_id], slmap, store_config
             )
             attractiveness_by_player[player_id] = best_attractiveness
 
         return attractiveness_by_player
 
     def normalized_attractiveness_allocation(
-        self,
-        slmap,
-        stores,
-        attractiveness_by_player
+        self, slmap, stores, attractiveness_by_player
     ):
         total_attractiveness = np.zeros(slmap.size)
         for player_id in stores:
             total_attractiveness += attractiveness_by_player[player_id]
-        total_attractiveness = np.where(total_attractiveness == 0, 1, total_attractiveness)
+        total_attractiveness = np.where(
+            total_attractiveness == 0, 1, total_attractiveness
+        )
 
         player_allocations = {}
         for player_id in stores:
@@ -108,8 +104,8 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
         step_size = 20
         all_sample_pos = []
 
-        x_pos = np.arange(0, slmap.size[0], step_size) + int(step_size/2)
-        y_pos = np.arange(0, slmap.size[1], step_size) + int(step_size/2)
+        x_pos = np.arange(0, slmap.size[0], step_size) + int(step_size / 2)
+        y_pos = np.arange(0, slmap.size[1], step_size) + int(step_size / 2)
         for i in range(len(x_pos)):
             x = x_pos[i]
             for j in range(len(y_pos)):
@@ -160,7 +156,7 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
         # store_types = ["small", "medium", "large"]
         # best_scores = [0, 0, 0]
         # best_positions = [[], [], []]
-        
+
         # for i in range(len(store_types)):
         #     store_type = store_types[i]
         #     if current_funds < store_conf[store_type]["capital_cost"]:
