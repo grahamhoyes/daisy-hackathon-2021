@@ -92,6 +92,7 @@ class MaxDensityPlayer(SiteLocationPlayer):
                     too_close = True
             if not too_close:
                 self.stores_to_place = [Store(max_pos, store_type)]
+                return
 
 
 class CopycatPlayer(SiteLocationPlayer):
