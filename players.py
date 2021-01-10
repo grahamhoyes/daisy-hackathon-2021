@@ -1,4 +1,5 @@
 import random
+import itertools
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 import copy
@@ -362,8 +363,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
         # # total_attractiveness = np.where(total_attractiveness == 0, 1, total_attractiveness)
         # attractiveness = total_attractiveness
 
-        # TODO: divide attractiveness by 100
-        potential = (1 - attractiveness) * slmap.population_distribution
+        potential = (1 - attractiveness / 100) * slmap.population_distribution
         # potential = slmap.population_distribution / attractiveness
 
         grid_size = (
@@ -389,18 +389,27 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
         # Find the first block that we don't have a store already in
         our_stores_pos = [
-            np.array(store.pos) for store in store_locations[self.player_id]
+            (store.store_type, np.array(store.pos))
+            for store in store_locations[self.player_id]
         ]
-        min_dist = 50
+
+        min_dists = {}
+        store_sizes = ["small", "medium", "large"]
+        for size1, size2 in itertools.product(store_sizes, store_sizes):
+            min_dists[(size1, size2)] = (
+                store_conf[size1]["attractiveness"]
+                + store_conf[size2]["attractiveness"]
+            ) / 2
 
         for block_position in sorted_potential_average_indices:
             # Convert block positions back to map positions (at the center of each block)
             map_position = block_position * step_size + step_size // 2
             too_close = False
 
-            for other_pos in our_stores_pos:
+            for other_store_type, other_pos in our_stores_pos:
                 dist = np.linalg.norm(other_pos - map_position)
-                if dist < min_dist:
+                # Allow some overlap of radaii
+                if dist < min_dists[(store_type, other_store_type)]*0.7:
                     too_close = True
                     break
 
@@ -416,7 +425,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
         current_funds: float,
     ):
         store_conf = self.config["store_config"]
-        step_size = 20
+        step_size = 10
 
         # Try the following combinations (if we can afford them),
         # see which gives the highest score:
@@ -466,6 +475,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store is not None:
                 self.stores_to_place = [store]
+                best_score = score
 
         # One large, one medium
         if (
@@ -477,6 +487,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store1 is not None and store2 is not None:
                 self.stores_to_place = [store1, store2]
+                best_score = score
 
         # One large, one small
         if (
@@ -487,6 +498,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store1 is not None and store2 is not None:
                 self.stores_to_place = [store1, store2]
+                best_score = score
 
         # Two medium stores
         if current_funds >= (store_conf["medium"]["capital_cost"] * 2):
@@ -494,6 +506,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store1 is not None and store2 is not None:
                 self.stores_to_place = [store1, store2]
+                best_score = score
 
         # One medium, one small
         if (
@@ -505,6 +518,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store1 is not None and store2 is not None:
                 self.stores_to_place = [store1, store2]
+                best_score = score
 
         # Two small
         if current_funds >= (store_conf["small"]["capital_cost"] * 2):
@@ -512,6 +526,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store1 is not None and store2 is not None:
                 self.stores_to_place = [store1, store2]
+                best_score = score
 
         # One medium
         if current_funds >= store_conf["medium"]["capital_cost"]:
@@ -524,6 +539,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store is not None:
                 self.stores_to_place = [store]
+                best_score = score
 
         # One small
         if current_funds >= store_conf["small"]["capital_cost"]:
@@ -536,3 +552,4 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
 
             if score > best_score and store is not None:
                 self.stores_to_place = [store]
+                best_score = score
