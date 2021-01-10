@@ -1,7 +1,7 @@
 import random
 import itertools
 import numpy as np
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 import copy
 
 from site_location import (
@@ -68,6 +68,14 @@ def all_players_attractiveness_allocation(
     return attractiveness_by_player
 
 
+def calculate_total_attractiveness(slmap, stores, attractiveness_by_player):
+    total_attractiveness = np.zeros(slmap.size)
+    for player_id in stores:
+        total_attractiveness += attractiveness_by_player[player_id]
+    total_attractiveness = np.where(total_attractiveness == 0, 1, total_attractiveness)
+    return total_attractiveness
+
+
 def normalized_attractiveness_allocation(slmap, stores, attractiveness_by_player):
     total_attractiveness = np.zeros(slmap.size)
     for player_id in stores:
@@ -115,72 +123,6 @@ def compute_sample_score(
     sample_score = (sample_alloc[player_id] * slmap.population_distribution).sum()
 
     return sample_score
-
-
-# helper function to compute the change in allocation based on new store placements
-def find_store_placement(
-    store_types,
-    sample_pos,
-    current_funds,
-    slmap,
-    store_locations,
-    config,
-    player_id,
-):
-    best_scores = []
-    best_positions = []
-    for i in range(len(store_types)):
-        best_scores.append(0)
-        best_positions.append([])
-
-    attractiveness_by_player = all_players_attractiveness_allocation(
-        slmap, store_locations, config["store_config"]
-    )
-
-    current_alloc = normalized_attractiveness_allocation(
-        slmap, store_locations, attractiveness_by_player
-    )
-    current_score = (
-        current_alloc[player_id] * slmap.population_distribution
-    ).sum() * config["profit_per_customer"]
-
-    for i in range(len(store_types)):
-        store_type = store_types[i]
-        store_cost = config["store_config"][store_type]["capital_cost"]
-        store_maintenance = config["store_config"][store_type]["operating_cost"]
-
-        if current_funds < store_cost:
-            continue
-        for pos in sample_pos:
-            sample_store = Store(pos, store_type)
-            temp_store_locations = copy.deepcopy(store_locations)
-            temp_store_locations[player_id].append(sample_store)
-
-            temp_attractiveness_by_player = copy.deepcopy(attractiveness_by_player)
-
-            sample_player_alloc = player_attractiveness_allocation(
-                temp_store_locations[player_id], slmap, config["store_config"]
-            )
-            temp_attractiveness_by_player[player_id] = sample_player_alloc
-            sample_alloc = normalized_attractiveness_allocation(
-                slmap, temp_store_locations, temp_attractiveness_by_player
-            )
-            sample_score = (
-                sample_alloc[player_id] * slmap.population_distribution
-            ).sum() * config["profit_per_customer"]
-
-            delta_score = sample_score - current_score
-            if delta_score > store_cost * 0.33:
-                if sample_score > best_scores[i]:
-                    best_scores[i] = sample_score
-                    best_positions[i] = [pos]
-                elif sample_score == best_scores[i]:
-                    best_positions[i].append(pos)
-
-        delta_score = best_scores[i] - current_score
-        print("Delta Score for {}: {:.0f}".format(store_type, delta_score))
-
-    return best_scores, best_positions
 
 
 class GridStrideAllocPlayer(SiteLocationPlayer):
@@ -252,7 +194,7 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
         return
 
 
-class MolecularWhalesPlayer(SiteLocationPlayer):
+class MarginalCostPartitionPlayer(SiteLocationPlayer):
     """
     Agent samples locations and selects the highest allocating one using
     the allocation function.
@@ -261,6 +203,70 @@ class MolecularWhalesPlayer(SiteLocationPlayer):
     def __init__(self, player_id: int, config: Dict):
         super().__init__(player_id, config)
         self.round = 0
+
+    def find_store_placement(
+        self,
+        store_type,
+        sample_pos,
+        current_funds,
+        slmap,
+        store_locations,
+    ):
+
+        store_cost = self.config["store_config"][store_type]["capital_cost"]
+        store_maintenance = self.config["store_config"][store_type]["operating_cost"]
+
+        if current_funds < store_cost:
+            return -np.inf, None
+
+        attractiveness_by_player = all_players_attractiveness_allocation(
+            slmap, store_locations, self.config["store_config"]
+        )
+
+        current_alloc = normalized_attractiveness_allocation(
+            slmap, store_locations, attractiveness_by_player
+        )
+        current_score = (
+            current_alloc[self.player_id] * slmap.population_distribution
+        ).sum() * self.config["profit_per_customer"]
+
+        best_score = 0.0
+        best_store = None
+
+        for pos in sample_pos:
+            sample_store = Store(pos, store_type)
+            temp_store_locations = copy.deepcopy(store_locations)
+            temp_store_locations[self.player_id].append(sample_store)
+
+            sample_player_alloc = player_attractiveness_allocation(
+                temp_store_locations[self.player_id],
+                slmap,
+                self.config["store_config"],
+            )
+            attractiveness_by_player[self.player_id] = sample_player_alloc
+
+            total_attractiveness = calculate_total_attractiveness(
+                slmap, temp_store_locations, attractiveness_by_player
+            )
+
+            sample_alloc = (
+                attractiveness_by_player[self.player_id] / total_attractiveness
+            )
+
+            sample_score = (
+                sample_alloc * slmap.population_distribution
+            ).sum() * self.config["profit_per_customer"]
+
+            delta_score = sample_score - current_score
+            if delta_score > store_cost * 0.33:
+                if sample_score > best_score:
+                    best_score = sample_score
+                    best_store = sample_store
+
+        delta_score = best_score - current_score
+        print("Delta Score for {}: {:.0f}".format(store_type, delta_score))
+
+        return best_score, best_store
 
     def place_stores(
         self,
@@ -277,68 +283,62 @@ class MolecularWhalesPlayer(SiteLocationPlayer):
         x_pos = np.arange(0, slmap.size[0], step_size) + half_window
         y_pos = np.arange(0, slmap.size[1], step_size) + half_window
         low_density_count = 0
-        for i in range(len(x_pos)):
-            x = x_pos[i]
-            for j in range(len(y_pos)):
-                y = y_pos[j]
+        threshold = (
+            slmap.population_distribution.mean() + slmap.population_distribution.std()
+        )
+        for x in x_pos:
+            for y in y_pos:
                 population_density = slmap.population_distribution[
                     x - half_window : x + half_window, y - half_window : y + half_window
                 ]
-                if (
-                    population_density.mean()
-                    < slmap.population_distribution.mean()
-                    + slmap.population_distribution.std()
-                ):
+                mean_density = population_density.mean()
+                if mean_density < threshold:
                     low_density_count += 1
                     continue
 
-                all_sample_pos.append((x, y))
+                all_sample_pos.append(((x, y), mean_density))
 
         print("Grid Count:", len(x_pos) * len(y_pos) - low_density_count)
+
+        # Sort the sample positions by decreasing density, so we cover them
+        # before timing out
+        all_sample_pos = sorted(all_sample_pos, key=lambda e: e[1], reverse=True)
+        # Remove density from the array
+        all_sample_pos = list(map(lambda e: e[0], all_sample_pos))
 
         # sample_pos = random.sample(all_sample_pos, 200)
         sample_pos = all_sample_pos
 
-        # Choose largest store type possible:
-        # if current_funds >= store_conf["large"]["capital_cost"]:
-        #     store_type = ["large"]
-        #     best_scores = [0]
-        #     best_positions = [[]]
-        # elif current_funds >= store_conf["medium"]["capital_cost"]:
-        #     store_type = ["medium"]
-        #     best_scores = [0]
-        #     best_positions = [[]]
-        # else:
-        #     store_type = ["small"]
-        #     best_scores = [0]
-        #     best_positions = [[]]
-
         self.stores_to_place = []
         temp_store_locations = copy.deepcopy(store_locations)
         for i in range(2):
-            store_types = ["small", "medium", "large"]
-            best_scores, best_positions = find_store_placement(
-                store_types,
-                sample_pos,
-                current_funds,
-                slmap,
-                temp_store_locations,
-                self.config,
-                self.player_id,
-            )
+            best_score = 0.0
+            best_store = None
 
-            best_index = np.argmax(best_scores)
-            best_pos = best_positions[best_index]
-            store_type = store_types[best_index]
+            for store_type in ["small", "medium", "large"]:
+                score, store = self.find_store_placement(
+                    store_type, sample_pos, current_funds, slmap, temp_store_locations
+                )
 
-            try:
-                self.stores_to_place.append(Store(random.choice(best_pos), store_type))
-            except:
+                if score > best_score:
+                    best_score = score
+                    best_store = store
+
+                    if i == 0:
+                        # Make sure we return something before timing out
+                        self.stores_to_place = [best_store]
+                    else:
+                        self.stores_to_place = [self.stores_to_place[0], best_store]
+
+            if best_store is None:
+                # If we couldn't place the first store, we won't be able to
+                # place the second
                 return
 
-            current_funds -= store_conf[store_type]["capital_cost"]
-            sample_store = Store(random.choice(best_pos), store_type)
-            temp_store_locations[self.player_id].append(sample_store)
+            # self.stores_to_place.append(best_store)
+
+            current_funds -= store_conf[best_store.store_type]["capital_cost"]
+            temp_store_locations[self.player_id].append(best_store)
 
         return
 
