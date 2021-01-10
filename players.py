@@ -438,7 +438,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
                 return -np.inf, None, None
 
             temp_store_locations = copy.deepcopy(store_locations)
-            store_locations[self.player_id].append(_store1)
+            temp_store_locations[self.player_id].append(_store1)
 
             _store2 = self.find_store_placement(
                 size2, step_size, slmap, temp_store_locations
