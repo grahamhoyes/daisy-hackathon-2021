@@ -208,7 +208,7 @@ DEFAULT_CONFIGURATION = {
     "starting_cash": 70000,
     "profit_per_customer": 0.5,
     "max_stores_per_round": 2,
-    "place_stores_time_s": 10,
+    "place_stores_time_s": -1,
     "ignore_player_exceptions": True,
     "store_config": {
         "small": {
@@ -381,10 +381,7 @@ class SiteLocationGame:
         self.player_classes = player_classes
 
         for i, player_class in enumerate(player_classes):
-            try:
-                self.players[i] = player_class(i, config)
-            except Exception as e:
-                log.error(f"Failed to instantiate player {i}")
+            self.players[i] = player_class(i, config)
             self.store_locations[0][i] = []
             self.allocations[0][i] = np.zeros(config["map_size"])
             self.scores[0][i] = config["starting_cash"]
@@ -422,8 +419,9 @@ class SiteLocationGame:
 
         self.current_round = 0
 
-    def train(self, player, episodes=100):
-        for _ in range(episodes):
+    def train(self, episodes=100):
+        player = self.players[0]
+        for i in range(episodes):
             episode_states = list()
             episode_internals = list()
             episode_actions = list()
@@ -433,24 +431,21 @@ class SiteLocationGame:
             if self.current_round != 0:
                 self.reset_game()
 
-            internals = player.internals
             terminal = False
             while not terminal:
 
-                states = deepcopy(self.slmaps[-1])
+                self.play_round()
 
-                episode_states.append(states)
+                actions, internals, states = player.get_experience()
+
                 episode_internals.append(internals)
-
-                actions, internals = player.get_actions_and_internals()
-
+                episode_states.append(states)
                 episode_actions.append(actions)
 
-                self.play_round()
                 terminal = self.current_round == self.config["n_rounds"]
 
                 episode_terminal.append(terminal)
-                episode_reward.append(int(self.winner() == player))
+                episode_reward.append(player.reward)
 
             player.agent.experience(
                 states=episode_states, internals=episode_internals,
@@ -458,6 +453,8 @@ class SiteLocationGame:
                 reward=episode_reward
             )
             player.agent.update()
+
+            self.save_game_report(f'game/{i}')
 
     def play(self):
         """Plays a full site location game, returns the winning
@@ -742,7 +739,7 @@ def main():
         players.append(import_player(player_str))
 
     game = SiteLocationGame(DEFAULT_CONFIGURATION, players, attractiveness_allocation)
-    game.play()
+    game.train()
     game.save_game_report(args.report)
 
 
