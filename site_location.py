@@ -547,7 +547,7 @@ class SiteLocationGame:
         player_id = max(self.scores[-1], key=self.scores[-1].get)
         return self.players[player_id]
 
-    def scores(self) -> List[Tuple[SiteLocationPlayer, float]]:
+    def get_scores(self) -> List[Tuple[SiteLocationPlayer, float]]:
         """Returns a list of (player, score) tuples
 
         Score in this case is the % of final money between all players
