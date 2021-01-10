@@ -356,15 +356,7 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
             store_locations[self.player_id], slmap, store_conf
         )
 
-        # attractiveness_by_player = all_players_attractiveness_allocation(slmap, store_locations, store_conf)
-        # total_attractiveness = np.zeros(slmap.size)
-        # for player_id in attractiveness_by_player:
-        #     total_attractiveness += attractiveness_by_player[player_id]
-        # # total_attractiveness = np.where(total_attractiveness == 0, 1, total_attractiveness)
-        # attractiveness = total_attractiveness
-
         potential = (1 - attractiveness / 100) * slmap.population_distribution
-        # potential = slmap.population_distribution / attractiveness
 
         grid_size = (
             self.config["map_size"][0] // step_size,
@@ -464,92 +456,28 @@ class StorePotentialAllocationPlayer(SiteLocationPlayer):
         best_score = 0.0
         self.stores_to_place = []
 
-        # One large store
-        if current_funds >= store_conf["large"]["capital_cost"]:
-            store = self.find_store_placement(
-                "large", step_size, slmap, store_locations
-            )
-            score = compute_sample_score(
-                store, self.player_id, slmap, store_locations, store_conf
-            )
+        # One store
+        for size in ["small", "medium", "large"]:
+            if current_funds >= store_conf[size]["capital_cost"]:
+                store = self.find_store_placement(
+                    size, step_size, slmap, store_locations
+                )
+                score = compute_sample_score(
+                    store, self.player_id, slmap, store_locations, store_conf
+                )
 
-            if score > best_score and store is not None:
-                self.stores_to_place = [store]
-                best_score = score
+                if score > best_score and store is not None:
+                    self.stores_to_place = [store]
+                    best_score = score
 
-        # One large, one medium
-        if (
-            current_funds
-            >= store_conf["large"]["capital_cost"]
-            + store_conf["medium"]["capital_cost"]
-        ):
-            score, store1, store2 = _test_two_stores("large", "medium")
+        # Two stores
+        store_sizes = ["small", "medium", "large"]
+        for size1, size2 in itertools.product(store_sizes, store_sizes):
+            if current_funds < store_conf[size1]["capital_cost"] + store_conf[size2]["capital_cost"]:
+                continue
 
-            if score > best_score and store1 is not None and store2 is not None:
-                self.stores_to_place = [store1, store2]
-                best_score = score
-
-        # One large, one small
-        if (
-            current_funds
-            >= store_conf["large"]["capital_cost"] + store_conf["small"]["capital_cost"]
-        ):
-            score, store1, store2 = _test_two_stores("large", "small")
+            score, store1, store2 = _test_two_stores(size1, size2)
 
             if score > best_score and store1 is not None and store2 is not None:
                 self.stores_to_place = [store1, store2]
-                best_score = score
-
-        # Two medium stores
-        if current_funds >= (store_conf["medium"]["capital_cost"] * 2):
-            score, store1, store2 = _test_two_stores("medium", "medium")
-
-            if score > best_score and store1 is not None and store2 is not None:
-                self.stores_to_place = [store1, store2]
-                best_score = score
-
-        # One medium, one small
-        if (
-            current_funds
-            >= store_conf["medium"]["capital_cost"]
-            + store_conf["small"]["capital_cost"]
-        ):
-            score, store1, store2 = _test_two_stores("medium", "small")
-
-            if score > best_score and store1 is not None and store2 is not None:
-                self.stores_to_place = [store1, store2]
-                best_score = score
-
-        # Two small
-        if current_funds >= (store_conf["small"]["capital_cost"] * 2):
-            score, store1, store2 = _test_two_stores("small", "small")
-
-            if score > best_score and store1 is not None and store2 is not None:
-                self.stores_to_place = [store1, store2]
-                best_score = score
-
-        # One medium
-        if current_funds >= store_conf["medium"]["capital_cost"]:
-            store = self.find_store_placement(
-                "medium", step_size, slmap, store_locations
-            )
-            score = compute_sample_score(
-                store, self.player_id, slmap, store_locations, store_conf
-            )
-
-            if score > best_score and store is not None:
-                self.stores_to_place = [store]
-                best_score = score
-
-        # One small
-        if current_funds >= store_conf["small"]["capital_cost"]:
-            store = self.find_store_placement(
-                "small", step_size, slmap, store_locations
-            )
-            score = compute_sample_score(
-                store, self.player_id, slmap, store_locations, store_conf
-            )
-
-            if score > best_score and store is not None:
-                self.stores_to_place = [store]
                 best_score = score
