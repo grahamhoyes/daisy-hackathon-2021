@@ -208,7 +208,7 @@ DEFAULT_CONFIGURATION = {
     "starting_cash": 70000,
     "profit_per_customer": 0.5,
     "max_stores_per_round": 2,
-    "place_stores_time_s": 10,
+    "place_stores_time_s": 20,
     "ignore_player_exceptions": True,
     "store_config": {
         "small": {

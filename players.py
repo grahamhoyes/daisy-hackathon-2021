@@ -21,6 +21,9 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
     Agent samples locations and selects the highest allocating one using
     the allocation function.
     """
+    def __init__(self, player_id: int, config: Dict):
+        super().__init__(player_id, config)
+        self.round = 0
 
     def player_attractiveness_allocation(
         self,
@@ -101,8 +104,14 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
         current_funds: float,
     ):
         store_conf = self.config["store_config"]
-        step_size = 20
+        step_size = 25
         all_sample_pos = []
+
+        self.round += 1
+
+        if self.round > 9:
+            self.stores_to_place = []
+            return 
 
         x_pos = np.arange(0, slmap.size[0], step_size) + int(step_size / 2)
         y_pos = np.arange(0, slmap.size[1], step_size) + int(step_size / 2)
@@ -123,66 +132,87 @@ class GridStrideAllocPlayer(SiteLocationPlayer):
         else:
             store_type = "small"
 
-        best_score = 0
-        best_pos = []
-
         attractiveness_by_player = self.all_players_attractiveness_allocation(
             slmap, store_locations, store_conf
         )
-
-        for pos in sample_pos:
-            sample_store = Store(pos, store_type)
-            temp_store_locations = copy.deepcopy(store_locations)
-            temp_store_locations[self.player_id].append(sample_store)
-
-            temp_attractiveness_by_player = copy.deepcopy(attractiveness_by_player)
-
-            sample_player_alloc = self.player_attractiveness_allocation(
-                temp_store_locations[self.player_id], slmap, store_conf
-            )
-            temp_attractiveness_by_player[self.player_id] = sample_player_alloc
-            sample_alloc = self.normalized_attractiveness_allocation(
-                slmap, temp_store_locations, temp_attractiveness_by_player
-            )
-            sample_score = (
-                sample_alloc[self.player_id] * slmap.population_distribution
-            ).sum()
-            if sample_score > best_score:
-                best_score = sample_score
-                best_pos = [pos]
-            elif sample_score == best_score:
-                best_pos.append(pos)
 
         # store_types = ["small", "medium", "large"]
         # best_scores = [0, 0, 0]
         # best_positions = [[], [], []]
 
-        # for i in range(len(store_types)):
-        #     store_type = store_types[i]
-        #     if current_funds < store_conf[store_type]["capital_cost"]:
-        #         continue
-        #     for pos in sample_pos:
-        #         sample_store = Store(pos, store_type)
-        #         temp_store_locations = copy.deepcopy(store_locations)
-        #         temp_store_locations[self.player_id].append(sample_store)
-        #         sample_alloc = attractiveness_allocation(
-        #             slmap, temp_store_locations, store_conf
-        #         )
-        #         sample_score = (
-        #             sample_alloc[self.player_id] * slmap.population_distribution
-        #         ).sum()
-        #         if sample_score > best_scores[i]:
-        #             best_scores[i] = sample_score
-        #             best_positions[i] = [pos]
-        #         elif sample_score == best_scores[i]:
-        #             best_positions.append(pos)
+
+        def find_store_placement(
+            store_types,
+            best_scores, 
+            best_positions,
+            store_locations
+        ):
+            attractiveness_by_player = self.all_players_attractiveness_allocation(
+                slmap, store_locations, store_conf
+            )
+            for i in range(len(store_types)):
+                store_type = store_types[i]
+                if current_funds < store_conf[store_type]["capital_cost"]:
+                    continue
+                for pos in sample_pos:
+                    sample_store = Store(pos, store_type)
+                    temp_store_locations = copy.deepcopy(store_locations)
+                    temp_store_locations[self.player_id].append(sample_store)
+
+                    temp_attractiveness_by_player = copy.deepcopy(attractiveness_by_player)
+
+                    sample_player_alloc = self.player_attractiveness_allocation(
+                        temp_store_locations[self.player_id], slmap, store_conf
+                    )
+                    temp_attractiveness_by_player[self.player_id] = sample_player_alloc
+                    sample_alloc = self.normalized_attractiveness_allocation(
+                        slmap, temp_store_locations, temp_attractiveness_by_player
+                    )
+                    sample_score = (
+                        sample_alloc[self.player_id] * slmap.population_distribution
+                    ).sum()
+                    if sample_score > best_scores[i]:
+                        best_scores[i] = sample_score
+                        best_positions[i] = [pos]
+                    elif sample_score == best_scores[i]:
+                        best_positions[i].append(pos)
+
+                # break 
+
+            
+        store_types = ["large", "medium", "small"]
+        best_scores = [0, 0, 0]
+        best_positions = [[], [], []]
+
+
+        self.stores_to_place = []
+
+        find_store_placement(
+            store_types, best_scores, best_positions, store_locations
+        )
+
+        best_index = np.argmax(best_scores)
+        best_pos = best_positions[best_index]
+        store_type = store_types[best_index]
+
+        self.stores_to_place.append(Store(random.choice(best_pos), store_type))
+
+        sample_store = Store(random.choice(best_pos), store_type)
+        temp_store_locations = copy.deepcopy(store_locations)
+        temp_store_locations[self.player_id].append(sample_store)
+
+
+        # store_types = ["small", "medium", "large"]
+        # best_scores = [0, 0, 0]
+        # best_positions = [[], [], []]
+
+        # find_store_placement(
+        #     store_types, best_scores, best_positions, temp_store_locations
+        # )
 
         # best_index = np.argmax(best_scores)
         # best_pos = best_positions[best_index]
         # store_type = store_types[best_index]
 
-        # import pdb; pdb.set_trace()
-        # max_alloc_positons = np.argwhere(alloc[self.player_id] == np.amax(alloc[self.player_id]))
-        # pos = random.choice(max_alloc_positons)
-        self.stores_to_place = [Store(random.choice(best_pos), store_type)]
+        # self.stores_to_place.append(Store(random.choice(best_pos), store_type))
         return
